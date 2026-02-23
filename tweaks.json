@@ -1,5 +1,3 @@
 [
-    {"action": "change_span", "amount": 150},
-    {"action": "adjust_nose_height", "amount": -80},
-    {"action": "adjust_upper_flaps", "amount": 60}
+    {"action": "flare_endplates_outward", "amount": 0.08}
 ]
