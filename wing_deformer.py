@@ -96,27 +96,16 @@ class WingController:
             self.deltas[name] = np.array([0, 0, 0], dtype=float)
 
     # --- CUSTOM TRANSFORMATIONS ---
-    def change_span(self, amount):
-        self.deltas['left_endplate'][0] -= amount
-        self.deltas['right_endplate'][0] += amount
-        for level in ['top', 'mid', 'bot']:
-            self.deltas[f'left_wing_{level}'][0] -= amount
-            self.deltas[f'right_wing_{level}'][0] += amount
-
-    def flare_endplates(self, amount):
-        self.deltas['left_endplate'][0] -= amount
-        self.deltas['right_endplate'][0] += amount
-
-    def adjust_nose_height(self, amount):
-        self.deltas['center_front'][2] += amount
-        self.deltas['left_front_body'][2] += amount
-        self.deltas['right_front_body'][2] += amount
-
-    def adjust_upper_flaps(self, amount):
-        self.deltas['left_wing_top'][2] += amount
-        self.deltas['right_wing_top'][2] += amount
-        self.deltas['left_wing_top'][1] += (amount * 0.5) 
-        self.deltas['right_wing_top'][1] += (amount * 0.5)
+    def steepen_upper_flaps(self, amount_z):
+        """
+        Simulates an aggressive Angle of Attack (AoA) on the top two flap layers.
+        Targets your l4 and l5 wing points.
+        """
+        for name in self.points:
+            if 'wing_l4' in name or 'wing_l5' in name:
+                self.deltas[name][2] += amount_z
+                # Move them slightly backwards (-X) as they pitch up for realism
+                self.deltas[name][0] -= amount_z * 0.3
 
     def flare_endplates_outward(self, amount_y):
         """
@@ -129,6 +118,50 @@ class WingController:
                     self.deltas[name][1] -= amount_y
                 elif 'right' in name:
                     self.deltas[name][1] += amount_y
+
+    def move_point(self, point_name, dx, dy, dz):
+        """
+        Moves a specific individual point by exact X, Y, Z amounts.
+
+        HOW TO CALL IT FROM THE JSON FILE:
+        [
+            {"action": "flare_endplates_outward", "amount": 0.08},
+            {"action": "steepen_upper_flaps", "amount": 0.05},
+            {"action": "move_point", "point_name": "body_nose_front", "dx": 0.0, "dy": 0.0, "dz": -0.04},
+            {"action": "move_point", "point_name": "wing_l1_r2_left", "dx": -0.02, "dy": 0.0, "dz": 0.01}
+        ]
+        """
+        if point_name in self.deltas:
+            self.deltas[point_name][0] += dx
+            self.deltas[point_name][1] += dy
+            self.deltas[point_name][2] += dz
+        else:
+            print(f"Warning: Point '{point_name}' not found!")
+
+    def move_symmetric_pair(self, base_name, dx, dy, dz):
+        """
+        Moves a left/right pair of points symmetrically.
+        Automatically finds the '_left' and '_right' versions of the base_name.
+        Mirrors the Y-axis (span) movement so they pull apart or push together symmetrically.
+        """
+        left_name = f"{base_name}_left"
+        right_name = f"{base_name}_right"
+        
+        # Apply to left side (Y movement is inverted for symmetry)
+        if left_name in self.deltas:
+            self.deltas[left_name][0] += dx
+            self.deltas[left_name][1] -= dy  # Mirror the Y direction!
+            self.deltas[left_name][2] += dz
+        else:
+            print(f"Warning: Symmetric point '{left_name}' not found!")
+            
+        # Apply to right side
+        if right_name in self.deltas:
+            self.deltas[right_name][0] += dx
+            self.deltas[right_name][1] += dy
+            self.deltas[right_name][2] += dz
+        else:
+            print(f"Warning: Symmetric point '{right_name}' not found!")
 
     def get_arrays(self):
         orig_list = []
@@ -222,7 +255,7 @@ def plot_wing(data, rbf=None):
     # Use fig.write_html("wing.html", auto_open=True) if your notebook struggles
     fig.show()
 
-def apply_wing_deformations(input_stl, output_stl=None, transforms=[], show_plot=False, radius=0.2):
+def apply_wing_deformations(input_stl, output_stl=None, transforms=[], show_plot=False, radius=0.2, floor_clearance=0.01):
     """Core function to apply deformations. Can be imported by other scripts."""
     print(f"Loading {input_stl}...")
     stl_file = io.STLHandler.read(input_stl)
@@ -234,10 +267,21 @@ def apply_wing_deformations(input_stl, output_stl=None, transforms=[], show_plot
     # Process requested transformations
     for t in transforms:
         action = t.get('action')
-        amount = t.get('amount')
+        
         if hasattr(wing, action):
-            print(f"Applying: {action} ({amount})")
-            getattr(wing, action)(amount)
+            if action == "move_point":
+                p_name = t.get('point_name')
+                dx, dy, dz = t.get('dx', 0), t.get('dy', 0), t.get('dz', 0)
+                wing.move_point(p_name, dx, dy, dz)
+                
+            elif action == "move_symmetric_pair":
+                base_name = t.get('base_name')
+                dx, dy, dz = t.get('dx', 0), t.get('dy', 0), t.get('dz', 0)
+                wing.move_symmetric_pair(base_name, dx, dy, dz)
+                
+            else:
+                amount = t.get('amount')
+                getattr(wing, action)(amount)
         else:
             print(f"Warning: Function '{action}' not found in WingController.")
 
@@ -247,6 +291,20 @@ def apply_wing_deformations(input_stl, output_stl=None, transforms=[], show_plot
     
     print("Calculating mesh deformation...")
     stl_file['points'] = rbf(points)
+
+    # ==========================================================
+    # NEW: FLOOR COLLISION AVOIDANCE
+    # ==========================================================
+    # 1. Find the absolute lowest Z coordinate in the whole mesh
+    min_z = np.min(stl_file['points'][:, 2])
+    
+    # 2. If it is below our safe clearance, lift the entire wing
+    if min_z < floor_clearance:
+        lift_amount = floor_clearance - min_z
+        print(f"⚠️ Wing dropped too low (min Z: {min_z:.4f}). Lifting entire mesh by {lift_amount:.4f} in Z.")
+        
+        # Shift all Z-coordinates upward by the exact deficit
+        stl_file['points'][:, 2] += lift_amount
 
     if output_stl:
         io.STLHandler.write(output_stl, stl_file)
