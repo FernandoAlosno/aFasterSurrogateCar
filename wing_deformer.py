@@ -87,6 +87,8 @@ class WingController:
         self.add_point('end_up_back_left', 0.467, -1.24, 0.392)
         self.add_point('end_up_back_right', 0.467, 1.24, 0.392)
 
+
+    # --- ADD POINT ---
     def add_point(self, name, x, y, z):
         self.points[name] = np.array([x, y, z], dtype=float)
         self.deltas[name] = np.array([0, 0, 0], dtype=float)
@@ -95,41 +97,11 @@ class WingController:
         for name in self.deltas:
             self.deltas[name] = np.array([0, 0, 0], dtype=float)
 
-    # --- CUSTOM TRANSFORMATIONS ---
-    def steepen_upper_flaps(self, amount_z):
-        """
-        Simulates an aggressive Angle of Attack (AoA) on the top two flap layers.
-        Targets your l4 and l5 wing points.
-        """
-        for name in self.points:
-            if 'wing_l4' in name or 'wing_l5' in name:
-                self.deltas[name][2] += amount_z
-                # Move them slightly backwards (-X) as they pitch up for realism
-                self.deltas[name][0] -= amount_z * 0.3
 
-    def flare_endplates_outward(self, amount_y):
-        """
-        Pushes all endplate points outward along the Y axis.
-        Automatically detects left vs right based on your naming!
-        """
-        for name in self.points:
-            if 'end_' in name:
-                if 'left' in name:
-                    self.deltas[name][1] -= amount_y
-                elif 'right' in name:
-                    self.deltas[name][1] += amount_y
-
+    # --- POINT TRANSFORMATIONS ---
     def move_point(self, point_name, dx, dy, dz):
         """
         Moves a specific individual point by exact X, Y, Z amounts.
-
-        HOW TO CALL IT FROM THE JSON FILE:
-        [
-            {"action": "flare_endplates_outward", "amount": 0.08},
-            {"action": "steepen_upper_flaps", "amount": 0.05},
-            {"action": "move_point", "point_name": "body_nose_front", "dx": 0.0, "dy": 0.0, "dz": -0.04},
-            {"action": "move_point", "point_name": "wing_l1_r2_left", "dx": -0.02, "dy": 0.0, "dz": 0.01}
-        ]
         """
         if point_name in self.deltas:
             self.deltas[point_name][0] += dx
@@ -163,6 +135,7 @@ class WingController:
         else:
             print(f"Warning: Symmetric point '{right_name}' not found!")
 
+
     def get_arrays(self):
         orig_list = []
         def_list = []
@@ -173,44 +146,14 @@ class WingController:
             def_list.append(orig_pos + movement)
         return np.array(orig_list), np.array(def_list)
 
-def plot_wing_old(data, rbf=None, color=None):
-    """Visualizes the wing and RBF vectors."""
-    if color is None: color = (0, 0, 1, 0.1)
-    
-    fig = plt.figure(figsize=(12, 8))
-    ax = fig.add_subplot(111, projection='3d')
-    points = np.array(data['points'])
-    verts = [points[cell] for cell in data['cells']]
-    
-    faces = Poly3DCollection(verts, linewidths=0.1, edgecolors=(0, 0, 0, 0.2))
-    faces.set_facecolor(color)
-    ax.add_collection3d(faces)
 
-    if rbf is not None:
-        orig_pts = rbf.original_control_points
-        def_pts = rbf.deformed_control_points
-        ax.scatter3D(orig_pts[:, 0], orig_pts[:, 1], orig_pts[:, 2], color='green', s=60, label='Original')
-        ax.scatter3D(def_pts[:, 0], def_pts[:, 1], def_pts[:, 2], color='red', s=60, label='Deformed')
-
-        for i in range(len(orig_pts)):
-            ax.plot([orig_pts[i, 0], def_pts[i, 0]], [orig_pts[i, 1], def_pts[i, 1]], [orig_pts[i, 2], def_pts[i, 2]],
-                    color='black', linestyle='--', linewidth=2)
-        ax.legend()
-
-    min_pts, max_pts = points.min(axis=0), points.max(axis=0)
-    mid_pts = (max_pts + min_pts) / 2
-    max_range = (max_pts - min_pts).max() / 2.0
-    ax.set_xlim3d(mid_pts[0] - max_range, mid_pts[0] + max_range)
-    ax.set_ylim3d(mid_pts[1] - max_range, mid_pts[1] + max_range)
-    ax.set_zlim3d(mid_pts[2] - max_range, mid_pts[2] + max_range)
-    ax.set_aspect('equal')
-    plt.show()
 
 def plot_wing(data, rbf=None):
+    """Visualizes the wing and RBF vectors using plotly."""
     points = np.array(data['points'])
     cells = np.array(data['cells'])
     
-    # 1. Render the Wing Mesh (much faster than Matplotlib)
+    # 1. Render the Wing Mesh
     fig = go.Figure(data=[go.Mesh3d(
         x=points[:, 0], y=points[:, 1], z=points[:, 2],
         i=cells[:, 0], j=cells[:, 1], k=cells[:, 2],
@@ -235,7 +178,6 @@ def plot_wing(data, rbf=None):
         ))
         
         # Draw the dashed movement lines
-        # (We use None to break the line between different point pairs)
         line_x, line_y, line_z = [], [], []
         for i in range(len(orig_pts)):
             line_x.extend([orig_pts[i, 0], def_pts[i, 0], None])
@@ -252,7 +194,6 @@ def plot_wing(data, rbf=None):
         margin=dict(l=0, r=0, b=0, t=0) # Makes the plot fill the screen
     )
     
-    # Use fig.write_html("wing.html", auto_open=True) if your notebook struggles
     fig.show()
 
 def apply_wing_deformations(input_stl, output_stl=None, transforms=[], show_plot=False, radius=0.2, floor_clearance=0.01):
@@ -292,10 +233,7 @@ def apply_wing_deformations(input_stl, output_stl=None, transforms=[], show_plot
     print("Calculating mesh deformation...")
     stl_file['points'] = rbf(points)
 
-    # ==========================================================
-    # NEW: FLOOR COLLISION AVOIDANCE
-    # ==========================================================
-    # 1. Find the absolute lowest Z coordinate in the whole mesh
+    # Find the absolute lowest Z coordinate in the whole mesh
     min_z = np.min(stl_file['points'][:, 2])
     
     # 2. If it is below our safe clearance, lift the entire wing

@@ -34,25 +34,9 @@ def validate_stl_for_cfd(filepath):
         return False, f"File read error: {str(e)}"
 
 
-def generate_lhs_dataset(input_stl="FrontWing.stl", num_samples=5):
+def generate_lhs_dataset(input_stl="FrontWing.stl", num_samples=300):
     output_dir = "Wings_Dataset"
     os.makedirs(output_dir, exist_ok=True)
-    
-    # =========================================================================
-    # 1. DEFINE YOUR PARAMETERS HERE
-    # Add as many functions or specific points as you want. 
-    # The script will automatically scale them and generate the CSV headers!
-    # =========================================================================
-
-    # params_config = [
-    #     # Global functions
-    #     {"action": "flare_endplates_outward", "type": "function",   "bound": [-0.05, 0.15]},
-    #     {"action": "steepen_upper_flaps",     "type": "function",   "bound": [-0.04, 0.08]},
-        
-    #     # Individual point tweaks (specify which axis you are modifying)
-    #     {"action": "move_point", "type": "move_point", "point_name": "body_nose_front", "axis": "dz", "bound": [-0.05, 0.02]},
-    #     {"action": "move_point", "type": "move_point", "point_name": "wing_l1_r2_left", "axis": "dx", "bound": [-0.02, 0.01]}
-    # ]
 
     params_config = [
         # Body points
@@ -197,12 +181,12 @@ def generate_lhs_dataset(input_stl="FrontWing.stl", num_samples=5):
     log_file = open(os.path.join(output_dir, "parameters_log.csv"), "w")
     log_file.write(",".join(csv_headers) + "\n")
 
-    # 2. GENERATE THE LHS MATRIX
+    # Generate the LHS matrix
     sampler = qmc.LatinHypercube(d=len(params_config))
     sample = sampler.random(n=num_samples)
     scaled_samples = qmc.scale(sample, lower_bounds, upper_bounds)
     
-    # 3. GENERATE THE DATASET
+    # Generate the dataset
     for i in range(num_samples):
         filename = f"wing_{i+1:03d}.stl"
         filepath = os.path.join(output_dir, filename)
@@ -213,17 +197,14 @@ def generate_lhs_dataset(input_stl="FrontWing.stl", num_samples=5):
         # Build the tweaks list and CSV row for this specific wing
         for j, p in enumerate(params_config):
             val = scaled_samples[i][j]
-            csv_row.append(f"{val:.6f}") # Log the exact value to 6 decimal places
+            csv_row.append(f"{val:.6f}")
             
             if p["type"] == "function":
                 my_tweaks.append({"action": p["action"], "amount": val})
                 
-            # THIS IS THE PART THAT WAS MISSING! 
-            # It now handles BOTH single points and symmetric pairs safely.
             elif p["type"] in ["move_point", "move_symmetric_pair"]:
-                # Initialize all movements to 0
                 dx, dy, dz = 0.0, 0.0, 0.0
-                # Assign the randomized value to the correct axis
+
                 if p["axis"] == "dx": dx = val
                 elif p["axis"] == "dy": dy = val
                 elif p["axis"] == "dz": dz = val
@@ -243,7 +224,7 @@ def generate_lhs_dataset(input_stl="FrontWing.stl", num_samples=5):
         
         print(f"\n--- Generating {filename} ---")
         
-        # Call the function from your wing_deformer.py script!
+        # Call the function from wing_deformer.py script
         apply_wing_deformations(
             input_stl=input_stl, 
             output_stl=filepath, 
@@ -252,9 +233,7 @@ def generate_lhs_dataset(input_stl="FrontWing.stl", num_samples=5):
             radius=0.2 
         )
 
-        # ==========================================
-        # NEW: VALIDATE THE MESH BEFORE PROCEEDING!
-        # ==========================================
+        # Validate the mesh
         is_valid, reason = validate_stl_for_cfd(filepath)
         
         if is_valid:
@@ -264,11 +243,11 @@ def generate_lhs_dataset(input_stl="FrontWing.stl", num_samples=5):
             csv_row.append("None")
         else:
             print(f"❌ MESH REJECTED: {reason}")
-            # Delete the broken STL so it doesn't accidentally get sent to OpenFOAM
+            # Delete the broken STL
             os.remove(filepath) 
             
-            # Log the failure in the CSV so your ML model knows this geometry is impossible
-            csv_row.append("False")
+            # Log the failure in the CSV so the ML model knows this geometry is impossible
+            csv_row.append("False") 
             csv_row.append(reason)
         
         # Log the completed row to the CSV
@@ -278,4 +257,4 @@ def generate_lhs_dataset(input_stl="FrontWing.stl", num_samples=5):
     print(f"\nDataset generation complete! Generated {num_samples} wings in '{output_dir}'.")
 
 if __name__ == "__main__":
-    generate_lhs_dataset(input_stl="FrontWing.stl", num_samples=50)
+    generate_lhs_dataset(input_stl="FrontWing.stl", num_samples=300)
