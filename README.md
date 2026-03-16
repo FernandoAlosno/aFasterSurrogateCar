@@ -1,6 +1,22 @@
 # aFasterSurrogateCar
 
-This project is a computational aerodynamics pipeline designed to optimize the Lift-to-Drag ratio ($C_l/C_d$) of a wing. It achieves this by procedurally generating different wing deformations, running Computational Fluid Dynamics (CFD) simulations, and leveraging surrogate modeling to find the absolute optimal geometry.
+This project presents a computational aerodynamics pipeline designed to optimize the Lift-to-Drag ratio (Cl​/Cd​) of a wing. The pipeline procedurally generates geometric deformations, runs Computational Fluid Dynamics (CFD) simulations, and leverages surrogate modeling to identify the optimal wing geometry.
+
+The initiative originated from a desire to tackle a geometry optimization problem, such as minimizing material usage, maximizing structural robustness, or improving aerodynamic efficiency. We ultimately chose the latter, focusing on optimizing a Formula 1 (F1) front wing to maximize its Cl​/Cd​ ratio. During the initial planning phase, it became clear that the primary bottleneck would be computational cost, specifically the time required to execute the CFD simulations.
+
+To mitigate this, we implemented a surrogate modeling approach. A surrogate model acts as an approximation, predicting the output of a computationally expensive process at a fraction of the cost. Because simulating wings using OpenFOAM was highly resource-intensive, a surrogate model capable of accurately predicting aerodynamic performance would allow us to significantly reduce computing costs by only simulating the most promising geometries.
+
+Prior to the full-scale simulations, we designed a simplified surrogate object with a shape resembling the actual wing. This allowed us to run much faster pilot simulations and begin testing our modeling pipeline immediately while the computationally heavy F1 wing simulations were processing.
+
+Training the final model required a robust dataset of CFD simulations. We needed to generate a wide variety of wing geometries that maintained physical viability. To achieve this, we applied Radial Basis Functions (RBF) to control points located in critical areas along the wing's surface. We then deformed the geometry by displacing these points using Latin Hypercube Sampling (LHS), ensuring a uniform distribution and diverse range of deformations.
+
+This method produced a dataset of approximately 350 .stl files representing different wing variations. These geometries were simulated using OpenFOAM at the Barcelona Supercomputing Center (BSC). Over several days of simulation, we compiled our final dataset, pairing each geometric deformation with its corresponding aerodynamic scores.
+
+Training a surrogate model to accurately predict simulation outputs proved more challenging than anticipated. Despite analyzing and testing numerous modeling strategies, the best performance we achieved was an R2 score of approximately 0.45 and a Spearman's rank correlation coefficient (ρ) of roughly 0.66. Given the substantial time invested by our team, these results were underwhelming. However, we remain optimistic and are currently exploring alternative modeling approaches while consulting with experienced professors to refine our methodology.
+
+Despite the surrogate model's limitations, our sampling methodology was highly successful. The initial LHS sampling identified several strong deformations that yielded an 8% higher Lift-to-Drag ratio than the baseline wing. By generating additional samples around these top-performing geometries, we iteratively improved the aerodynamic efficiency, ultimately achieving a 17.8% improvement over the original wing.
+
+At present, the project is paused while we investigate better strategies for training the surrogate model to realize our originally intended framework. Nevertheless, we are extremely pleased with the optimization results obtained and have extracted highly valuable experience in computational fluid dynamics and machine learning pipelines from this project.
 
 ## How does it work
 
